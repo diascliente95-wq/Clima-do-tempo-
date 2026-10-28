@@ -80,10 +80,11 @@ function showRadarFrame(index){
  const stamp=frame.time?new Date(frame.time*1000).toLocaleTimeString('pt-BR'):'quadro previsto';
  $('mapStatus').textContent='Radar de precipitação · '+stamp+'. Quadros e cobertura dependem do serviço RainViewer; não substitui alertas oficiais.';
 }
-function toggleRadarAnimation(){
- if(!radarFrames.length){loadRadarTiles();return}
+async function toggleRadarAnimation(){
  if(radarTimer){clearInterval(radarTimer);radarTimer=null;$('radarBtn').textContent='▶ Radar animado';$('mapStatus').textContent='Animação do radar pausada.';return}
- chooseLayer('radar');$('radarBtn').textContent='Ⅱ Pausar radar';
+ if(!radarFrames.length)await loadRadarTiles();
+ if(!radarFrames.length)return;
+ chooseLayer('radar');showRadarFrame(radarIndex);if(rainLayer)rainLayer.addTo(map);$('radarBtn').textContent='Ⅱ Pausar radar';
  radarTimer=setInterval(()=>showRadarFrame(radarIndex+1),700);
 }
 async function loadCityTemperatures(){
