@@ -62,9 +62,29 @@ function initMap(){
  map.on('click',e=>{coords={latitude:e.latlng.lat,longitude:e.latlng.lng};currentCity='Ponto selecionado no mapa';if(marker)marker.setLatLng(e.latlng);else marker=L.marker(e.latlng).addTo(map);marker.bindPopup('Consultando previsão…').openPopup();$('mapStatus').textContent='Consultando o ponto '+e.latlng.lat.toFixed(3)+', '+e.latlng.lng.toFixed(3)+'…';loadWeather();loadAirQuality()});
  $('mapStatus').textContent='Mapa pronto. Use os botões para trocar a camada.';
 }
+let radarFrames=[],radarHost='',radarTimer=null,radarIndex=0;
 async function loadRadarTiles(){
- try{const res=await fetch('https://api.rainviewer.com/public/weather-maps.json');if(!res.ok)throw Error('Radar indisponível');const meta=await res.json();const frames=meta.radar&&meta.radar.past||[];if(!frames.length)throw Error('Sem quadros recentes de radar');const frame=frames[frames.length-1];if(rainLayer&&map)map.removeLayer(rainLayer);rainLayer=L.tileLayer(meta.host+frame.path+'/256/{z}/{x}/{y}/2/1_1.png',{opacity:.7,attribution:'Radar © RainViewer',maxZoom:7});if($('radarBtn').classList.contains('active'))rainLayer.addTo(map);$('mapStatus').textContent='Radar de precipitação carregado: quadro recente de '+new Date(frame.time*1000).toLocaleTimeString('pt-BR')+'. Mostra precipitação observada, não previsão futura.'}
- catch(e){$('mapStatus').textContent='Radar temporariamente indisponível. A imagem de satélite e o mapa de ruas continuam disponíveis.'}
+ try{
+  const res=await fetch('https://api.rainviewer.com/public/weather-maps.json');if(!res.ok)throw Error('Radar indisponível');
+  const meta=await res.json();radarHost=meta.host;radarFrames=[...(meta.radar&&meta.radar.past||[]),...(meta.radar&&meta.radar.nowcast||[])];
+  if(!radarFrames.length)throw Error('Sem quadros de radar');radarIndex=Math.max(0,(meta.radar&&meta.radar.past||[]).length-1);
+  showRadarFrame(radarIndex);
+  $('mapStatus').textContent='Radar carregado. Use “Radar de chuva” para alternar a camada; a animação percorre quadros disponíveis do provedor.';
+ }catch(e){$('mapStatus').textContent='Radar temporariamente indisponível. Satélite e mapa de ruas continuam disponíveis.'}
+}
+function showRadarFrame(index){
+ if(!map||!radarFrames.length)return;radarIndex=(index+radarFrames.length)%radarFrames.length;
+ const frame=radarFrames[radarIndex];if(rainLayer)map.removeLayer(rainLayer);
+ rainLayer=L.tileLayer(radarHost+frame.path+'/256/{z}/{x}/{y}/2/1_1.png',{opacity:.76,attribution:'Radar © RainViewer',maxZoom:7});
+ if($('radarBtn').classList.contains('active'))rainLayer.addTo(map);
+ const stamp=frame.time?new Date(frame.time*1000).toLocaleTimeString('pt-BR'):'quadro previsto';
+ $('mapStatus').textContent='Radar de precipitação · '+stamp+'. Quadros e cobertura dependem do serviço RainViewer; não substitui alertas oficiais.';
+}
+function toggleRadarAnimation(){
+ if(!radarFrames.length){loadRadarTiles();return}
+ if(radarTimer){clearInterval(radarTimer);radarTimer=null;$('radarBtn').textContent='▶ Radar animado';$('mapStatus').textContent='Animação do radar pausada.';return}
+ chooseLayer('radar');$('radarBtn').textContent='Ⅱ Pausar radar';
+ radarTimer=setInterval(()=>showRadarFrame(radarIndex+1),700);
 }
 async function loadCityTemperatures(){
  if(!map||!window.L)return;
@@ -75,13 +95,18 @@ async function loadCityTemperatures(){
  $('mapStatus').textContent='Temperaturas disponíveis em '+count+' de '+cities.length+' capitais/cidades selecionadas. Os marcadores não representam todos os municípios.';
 }
 function chooseLayer(which){
- if(!map)return;Object.values(baseLayers).forEach(l=>map.removeLayer(l));baseLayers[which].addTo(map);if(rainLayer)map.removeLayer(rainLayer);if(which==='radar'&&rainLayer)rainLayer.addTo(map);
- ['satBtn','streetBtn','radarBtn'].forEach(id=>$(id).classList.remove('active'));$(which==='sat'?'satBtn':which==='street'?'streetBtn':'radarBtn').classList.add('active');
- if(which==='sat')$('mapStatus').textContent='Imagem de satélite selecionada. A camada depende do provedor externo e não é necessariamente vídeo ao vivo.';
- else if(which==='street')$('mapStatus').textContent='Mapa de ruas selecionado. Toque no mapa para consultar o clima do ponto escolhido.';
- else $('mapStatus').textContent=rainLayer?'Radar selecionado. O quadro é de precipitação observada recente.':'Carregando radar de precipitação…';
+ if(!map)return;
+ if(baseLayers.sat)map.removeLayer(baseLayers.sat);if(baseLayers.street)map.removeLayer(baseLayers.street);
+ if(rainLayer)map.removeLayer(rainLayer);
+ if(which==='sat')baseLayers.sat.addTo(map);else baseLayers.street.addTo(map);
+ if(which==='radar'&&rainLayer)rainLayer.addTo(map);
+ ['satBtn','streetBtn','radarBtn'].forEach(id=>$(id).classList.remove('active'));
+ $(which==='sat'?'satBtn':which==='street'?'streetBtn':'radarBtn').classList.add('active');
+ if(which==='sat')$('mapStatus').textContent='Imagem de satélite selecionada. Imagens dependem do provedor e não são necessariamente vídeo ao vivo.';
+ else if(which==='street')$('mapStatus').textContent='Mapa de ruas selecionado. Toque em um ponto para consultar a previsão.';
+ else $('mapStatus').textContent=rainLayer?'Radar de precipitação selecionado.':'Carregando radar de precipitação…';
 }
-$('satBtn').onclick=()=>chooseLayer('sat');$('streetBtn').onclick=()=>chooseLayer('street');$('radarBtn').onclick=()=>{if(!map)return;chooseLayer('radar');if(!rainLayer)loadRadarTiles()};
+$('satBtn').onclick=()=>chooseLayer('sat');$('streetBtn').onclick=()=>chooseLayer('street');$('radarBtn').onclick=toggleRadarAnimation;
 $('homeMap').onclick=()=>{if(map)map.setView([-14.2,-51.9],4);loadCityTemperatures()};
 function useGeo(onSuccess){if(!navigator.geolocation){$('settingsStatus').textContent='Este navegador não oferece geolocalização.';return}navigator.geolocation.getCurrentPosition(p=>{coords={latitude:p.coords.latitude,longitude:p.coords.longitude};currentCity='Sua localização';if(map)map.setView([coords.latitude,coords.longitude],9);onSuccess()},()=>{$('settingsStatus').textContent='Localização não permitida. Pesquise uma cidade ou toque no mapa.'},{enableHighAccuracy:false,timeout:10000,maximumAge:300000})}
 $('myMap').onclick=()=>useGeo(()=>{loadWeather();loadAirQuality()});
